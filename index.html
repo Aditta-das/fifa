@@ -142,6 +142,10 @@ body{font-family:'Inter',sans-serif;background:#080d1c;color:#e2e8f0;min-height:
   height: 40px;
 }
 
+.stadiumName {
+  color: #fff;
+}
+
 </style>
 </head>
 <body>
@@ -311,34 +315,50 @@ function teamCode(name){
     .toUpperCase();
 }
 
-function cardHTML(g,idx,stadiumName){
-  const status=parseStatus(g);
-  const home=teamName(g,"home");
-  const away=teamName(g,"away");
-  const tournament=
-  g.group
-  ? `Group ${g.group}`
-  : g.stage || g.round || g.tournament || g.phase || "World Cup 2026";
-  const venue=stadiumName||g.venue||g.stadium_name||"";
-  const matchDate=parseDate(g);
-  const dateLabel=matchDate?new Date(matchDate).toLocaleDateString("en-US",{month:"short",day:"numeric"}):"";
-  const delay=Math.min(idx*0.08+0.04,1.2);
-  const cardCls=status==="live"?"live-card":status==="finished"?"finished-card":"";
-  const sCls=status==="live"?"s-live":status==="finished"?"s-finished":"s-upcoming";
-  const sLabel=status==="live"?"● LIVE":status==="finished"?"✓ Full Time":"Upcoming";
-  return`<div class="match-card ${cardCls}" style="animation-delay:${delay}s">
-<div class="match-top">
-  <div class="tournament-info"><i class="ti ti-trophy" aria-hidden="true"></i><span>${tournament}</span>${dateLabel?`<span class="match-date-badge">${dateLabel}</span>`:""}</div>
-  <span class="status-pill ${sCls}">${sLabel}</span>
-</div>
-<div class="match-body">
-  <div class="team"><div class="team-flag">${flag(home)}</div><div class="team-name">${home}</div><div class="team-code">${teamCode(home)}</div></div>
-  <div style="margin:10px 0">
-    ${scoreBlock(g,status)}
-</div>
-  <div class="team"><div class="team-flag">${flag(away)}</div><div class="team-name">${away}</div><div class="team-code">${teamCode(away)}</div></div>
-</div>
-${venue?`<div class="match-footer"><i class="ti ti-map-pin" aria-hidden="true"></i>${venue}</div>`:""}
+function cardHTML(g, idx, stadiumName){
+  const status = parseStatus(g);
+  const home = teamName(g,"home");
+  const away = teamName(g,"away");
+
+  const tournament =
+    g.group
+      ? `Group ${g.group}`
+      : g.stage || g.round || g.tournament || g.phase || "World Cup 2026";
+
+  const matchDate = parseDate(g);
+  const dateLabel = matchDate
+    ? new Date(matchDate).toLocaleDateString("en-US",{month:"short",day:"numeric"})
+    : "";
+
+  const delay = Math.min(idx * 0.08 + 0.04, 1.2);
+  const cardCls = status==="live"?"live-card":status==="finished"?"finished-card":"";
+  const sCls = status==="live"?"s-live":status==="finished"?"s-finished":"s-upcoming";
+  const sLabel = status==="live"?"● LIVE":status==="finished"?"✓ Full Time":"Upcoming";
+
+  const sid = g.stadium_id || g.venue_id;
+  const stadium = stadiumName || "Unknown Stadium";
+
+  return `
+<div class="match-card ${cardCls}" style="animation-delay:${delay}s">
+  <div class="match-top">
+    <div class="tournament-info">
+      <i class="ti ti-trophy"></i>
+      <span>${tournament}</span>
+      ${dateLabel ? `<span class="match-date-badge">${dateLabel}</span>` : ""}
+    </div>
+    <span class="status-pill ${sCls}">${sLabel}</span>
+  </div>
+
+  <div class="match-body">
+    <div style="margin:10px 0">
+      ${scoreBlock(g,status)}
+    </div>
+  </div>
+
+  <div class="match-footer">
+    <i class="ti ti-map-pin"></i>
+    <span class="stadiumName">${stadium}</span>
+  </div>
 </div>`;
 }
 
@@ -383,22 +403,38 @@ function updateStats(games){
 }
 
 async function fetchStadium(id){
-  if(!id)return"";
-  if(stadiumCache[id]!==undefined)return stadiumCache[id];
+  if(!id) return "";
+  if(stadiumCache[id] !== undefined) return stadiumCache[id];
+
   try{
-    const r=await fetch(`https://worldcup26.ir/get/stadium/${id}`);
-    const d=await r.json();
-    const name=d.name||d.stadium_name||d.title||"";
-    stadiumCache[id]=name;
+    const r = await fetch(`https://worldcup26.ir/get/stadium/${id}`);
+    const d = await r.json();
+
+    const name = d?.stadium?.name_en || "Unknown Stadium";
+
+    stadiumCache[id] = name;
     return name;
-  }catch(e){stadiumCache[id]="";return""}
+  }catch(e){
+    stadiumCache[id] = "Unknown Stadium";
+    return "Unknown Stadium";
+  }
 }
 
 async function loadStadiums(games){
-  const ids=[...new Set(games.map(g=>g.stadium_id||g.venue_id).filter(Boolean))];
-  await Promise.all(ids.map(id=>fetchStadium(id)));
-}
+  const ids = [...new Set(games.map(g => g.stadium_id).filter(Boolean))];
 
+  await Promise.all(
+    ids.map(async id => {
+      const name = await fetchStadium(id);
+
+      games.forEach(g => {
+        if(g.stadium_id === id){
+          g.stadium_name = name;
+        }
+      });
+    })
+  );
+}
 function renderGames(games){
   const filtered=filterGames(games,currentFilter);
   const el=document.getElementById("main-content");
@@ -409,7 +445,7 @@ function renderGames(games){
   el.innerHTML=filtered.map((g,i)=>{
     const sid=g.stadium_id||g.venue_id||null;
     const sName=sid&&stadiumCache[sid]?stadiumCache[sid]:"";
-    return cardHTML(g,i,sName);
+    return cardHTML(g,i,g.stadium_name);
   }).join("");
 }
 
@@ -427,14 +463,38 @@ async function init(){
     document.getElementById("filters").style.display="";
     await loadStadiums(allGames);
     renderGames(allGames);
-    setInterval(async()=>{
-      try{
-        const r2=await fetch("https://worldcup26.ir/get/games");
-        const raw2=await r2.json();
-        const games2=Array.isArray(raw2)?raw2:raw2.games||raw2.data||raw2.matches||[];
-        if(games2.length){allGames=games2;updateStats(allGames);renderGames(allGames);}
-      }catch(e){}
-    },30000);
+    let refreshTimer=null;
+
+function hasLiveGame(games){
+  return games.some(g=>parseStatus(g)==="live");
+}
+
+async function refreshGames(){
+  try{
+    const r=await fetch("https://worldcup26.ir/get/games");
+    const raw=await r.json();
+
+    const games=Array.isArray(raw)
+      ? raw
+      : raw.games || raw.data || raw.matches || raw.results || [];
+
+    if(!games.length) return;
+
+    allGames=games;
+    updateStats(allGames);
+    renderGames(allGames);
+
+    if(!hasLiveGame(allGames) && refreshTimer){
+      clearInterval(refreshTimer);
+      refreshTimer=null;
+      console.log("Auto refresh stopped");
+    }
+  }catch(e){}
+}
+
+if(hasLiveGame(allGames)){
+  refreshTimer=setInterval(refreshGames,30000);
+}
   }catch(e){
     document.getElementById("main-content").innerHTML=`<div class="error-box"><i class="ti ti-alert-triangle"></i>Could not load matches: ${e.message}</div>`;
   }
